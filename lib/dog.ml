@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+
 open Printf
 open Irmin_unix
 open Dog_misc
@@ -22,6 +23,8 @@ module StringSet = struct
   include Set.Make(String)
   let of_list l = List.fold_left (fun s e -> add e s) empty l
 end
+
+let _ = Secure_log.key_of_cstruct (Cstruct.create 0)
 
 type merge =
   [ `Ignore

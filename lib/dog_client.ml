@@ -15,17 +15,93 @@
  *)
 
 open Irmin_unix
+open Sexplib.Std
 
 let (>>=) = Lwt.bind
+let (>|=) a f = Lwt.map f a
 
-let init ~root name =
+let write_key ~root key =
+  Lwt_io.with_file
+    ~flags:[Unix.O_CREAT; Unix.O_TRUNC; Unix.O_WRONLY]
+    ~mode:Lwt_io.output
+    (Filename.concat root ".key")
+    (fun channel ->
+       let str =
+         Cstruct.to_string key
+       in
+       Lwt_io.write channel str)
+
+let read_key ~root =
+  Lwt_io.with_file
+    ~flags:[Unix.O_RDONLY]
+    ~mode:Lwt_io.input
+    (Filename.concat root ".key")
+    (fun channel ->
+       Lwt_io.read channel
+       >|= Cstruct.of_string)
+
+let read_log ~root store =
+  Irmin.read store ["secure_log"] >>= function
+  | None -> assert false
+  | Some entries_sexp ->
+    let entries_sexp = Sexplib.Sexp.of_string entries_sexp in
+    let entries = list_of_sexp Secure_log.entry_of_sexp entries_sexp in
+    read_key ~root >>= fun key ->
+    let key = Secure_log.key_of_cstruct key in
+    Secure_log.reconstruct key entries
+    |> Lwt.return
+
+let split_log log =
+  let key = Secure_log.get_key log |> Secure_log.cstruct_of_key in
+  let entries = Secure_log.get_entries log |> Sexplib.Conv.sexp_of_list Secure_log.sexp_of_entry in
+  key, entries
+
+let write_log ~root store log =
+  let key, entries = split_log log in
+  let entries_str = entries |> Sexplib.Sexp.to_string in
+  Irmin.update store ["secure_log"] entries_str >>= fun () ->
+  write_key ~root key
+
+let init ~root ~key name =
+  let key = Cstruct.of_string key in
   let head = Git.Reference.of_raw ("refs/heads/" ^ name) in
   let config = Irmin_git.config ~root ~bare:false ~head () in
   Irmin.of_tag Dog_misc.base_store config Dog_misc.task name >>= fun t ->
-  Irmin.head (t "head") >>= function
-  | Some _ -> Lwt.return_unit
-  | None   ->
-    Irmin.update (t "Initial commit") [".init"] (Dog_misc.timestamp ())
+  Irmin.head (t "head") >>=  begin function
+    | Some _ -> Lwt.return_unit
+    | None   ->
+      Irmin.update (t "Initial commit") [".init"] (Dog_misc.timestamp ())
+  end
+  >>= fun () ->
+  Dog_misc.(mk_store base_store ~root) >>= fun t ->
+  let store = t "secure_log" in
+  Secure_log.new_log (Secure_log.key_of_cstruct key)
+  |> write_log ~root store
+
+let entry_type = Cstruct.create 1
+
+let write_to_log ~root message =
+  Dog_misc.(mk_store base_store ~root) >>= fun t ->
+  let store = t "secure_log" in
+  read_log ~root store >>= fun log ->
+  let log' = Secure_log.append entry_type (Cstruct.of_string message) log in
+  write_log ~root store log'
+
+let dump_log ~root key =
+  let key = key |> Cstruct.of_string |> Secure_log.key_of_cstruct in
+  Dog_misc.(mk_store base_store ~root) >>= fun t ->
+  let store = t "secure_log" in
+  read_log ~root store >|= fun log ->
+  List.iteri
+    (fun i _ ->
+       let str = Secure_log.get_entry log key i |> Cstruct.to_string in
+       Printf.printf "%i: %s" i str)
+    (Secure_log.get_entries log)
+  (*
+  Secure_log.decrypt_all log key
+  |> List.map Cstruct.to_string
+  |> List.iteri (fun i str -> Printf.printf "%i: %s" i str)
+     *)
 
 let remote_store =
   Irmin.basic (module Irmin_http.Make) (module Irmin.Contents.String)
@@ -76,7 +152,9 @@ let rec_files ?(keep=fun _ -> true) root =
     List.fold_left aux (f @ accu) d in
   aux [] []
 
-let keep = function ".git" -> false | _ -> true
+let keep = function
+  | ".git" | ".key" -> false
+  | _ -> true
 
 let of_path p =
   let file = Dog_misc.path p in

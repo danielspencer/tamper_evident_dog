@@ -22,6 +22,7 @@ depends: [
   "irmin" {>= "0.9.5"}
   "git" {>= "1.4.10"}
   "cohttp"
+  "secure_log_lib"
   "re"
   "dolog" {>= "1.0"}
   "cmdliner"

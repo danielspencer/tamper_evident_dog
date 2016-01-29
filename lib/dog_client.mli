@@ -14,5 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-val init: root:string -> string -> unit Lwt.t
+val init: root:string -> key:string -> string -> unit Lwt.t
+val write_to_log: root:string -> string -> unit Lwt.t
+val dump_log: root:string -> string -> unit Lwt.t
 val push: root:string -> msg:string -> ?watch:float -> Uri.t -> unit Lwt.t

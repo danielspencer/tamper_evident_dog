@@ -98,6 +98,11 @@ let root =
     Arg.info ~docv:"ROOT" ~doc:"The repository root." ["r";"root"] in
   Arg.(value & opt string cwd & doc)
 
+let key =
+  let doc =
+    Arg.info ~docv:"KEY" ~doc:"The key used to encrypt the secure log." [] in
+  Arg.(required & pos 0 (some string) None & doc)
+
 (* INIT *)
 let init = {
   name = "init";
@@ -109,8 +114,37 @@ let init = {
         Arg.info ~docv:"NAME" ~doc:"The client name." [] in
       Arg.(required & pos 0 (some string) None & doc)
     in
-    let init root name = run (Dog_client.init ~root name) in
-    Term.(mk init $ root $ client_name)
+    let init root name key = run (Dog_client.init ~root ~key name) in
+    Term.(mk init $ root $ client_name $ key)
+}
+
+(* APPEND *)
+let append = {
+  name = "append";
+  doc  = "Append to the secure log.";
+  man  = [];
+  term =
+    let log =
+      let doc =
+        Arg.info ~docv:"LOG" ~doc:"The message to log" [] in
+      Arg.(required & pos 0 (some string) None & doc)
+    in
+    let write root log =
+      run (Dog_client.write_to_log ~root log)
+    in
+    Term.(mk write $ root $ log);
+}
+
+(* DUMP *)
+let dump = {
+  name = "dump";
+  doc  = "Dump the contents of the secure log to stdout.";
+  man  = [];
+  term =
+    let dump root key =
+      run (Dog_client.dump_log ~root key)
+    in
+    Term.(mk dump $ root $ key);
 }
 
 (* PUSH *)
@@ -202,6 +236,8 @@ let commands = List.map create_command [
     init;
     push;
     listen;
+    append;
+    dump;
   ]
 
 let () = Ezcmdliner.run default commands
