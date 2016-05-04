@@ -78,6 +78,14 @@ let init ~root ~key name =
   Secure_log.new_log (Secure_log.key_of_cstruct key)
   |> write_log ~root store
 
+let test_key_write_read ~root key =
+  let key = Cstruct.of_string key in
+  write_key ~root key >>= fun () ->
+  read_key ~root >>= fun key' ->
+  assert (Cstruct.equal key key')
+  |> Lwt.return
+
+
 let entry_type = Cstruct.create 1
 
 let write_to_log ~root message =
@@ -92,16 +100,16 @@ let dump_log ~root key =
   Dog_misc.(mk_store base_store ~root) >>= fun t ->
   let store = t "secure_log" in
   read_log ~root store >|= fun log ->
+  (*
   List.iteri
     (fun i _ ->
        let str = Secure_log.get_entry log key i |> Cstruct.to_string in
        Printf.printf "%i: %s" i str)
     (Secure_log.get_entries log)
-  (*
+     *)
   Secure_log.decrypt_all log key
   |> List.map Cstruct.to_string
-  |> List.iteri (fun i str -> Printf.printf "%i: %s" i str)
-     *)
+  |> List.iteri (fun i str -> Printf.printf "%i: %s\n" i str)
 
 let remote_store =
   Irmin.basic (module Irmin_http.Make) (module Irmin.Contents.String)

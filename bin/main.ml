@@ -98,10 +98,10 @@ let root =
     Arg.info ~docv:"ROOT" ~doc:"The repository root." ["r";"root"] in
   Arg.(value & opt string cwd & doc)
 
-let key =
+let key n =
   let doc =
     Arg.info ~docv:"KEY" ~doc:"The key used to encrypt the secure log." [] in
-  Arg.(required & pos 0 (some string) None & doc)
+  Arg.(required & pos n (some string) None & doc)
 
 (* INIT *)
 let init = {
@@ -115,7 +115,7 @@ let init = {
       Arg.(required & pos 0 (some string) None & doc)
     in
     let init root name key = run (Dog_client.init ~root ~key name) in
-    Term.(mk init $ root $ client_name $ key)
+    Term.(mk init $ root $ client_name $ key 1)
 }
 
 (* APPEND *)
@@ -144,7 +144,7 @@ let dump = {
     let dump root key =
       run (Dog_client.dump_log ~root key)
     in
-    Term.(mk dump $ root $ key);
+    Term.(mk dump $ root $ key 0);
 }
 
 (* PUSH *)
@@ -231,6 +231,18 @@ let default =
     ~doc
     ~man
 
+(* test *)
+let test_key = {
+  name = "test_key";
+  doc  = "AAAAAAAA";
+  man  = [];
+  term =
+    let test root key =
+      run (Dog_client.test_key_write_read ~root key)
+    in
+    Term.(mk test $ root $ key 0);
+}
+
 let commands = List.map create_command [
     help;
     init;
@@ -238,6 +250,7 @@ let commands = List.map create_command [
     listen;
     append;
     dump;
+    test_key;
   ]
 
 let () = Ezcmdliner.run default commands

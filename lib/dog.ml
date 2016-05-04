@@ -331,3 +331,6 @@ let listen ~root =
       Server.create config task >>= fun s ->
       HTTP.listen (s "Listen") ~hooks (Uri.of_string "http://localhost:8080")
     )
+
+
+let _ = Cohttps.foo;;
