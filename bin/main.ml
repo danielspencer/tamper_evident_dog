@@ -135,6 +135,23 @@ let append = {
     Term.(mk write $ root $ log);
 }
 
+(* APPEND *)
+let test_append = {
+  name = "test_append";
+  doc  = "Append to the secure log.";
+  man  = [];
+  term =
+    let log =
+      let doc =
+        Arg.info ~docv:"LOG" ~doc:"The message to log" [] in
+      Arg.(required & pos 0 (some string) None & doc)
+    in
+    let write root log =
+      run (Dog_client.test_write_to_log ~root log)
+    in
+    Term.(mk write $ root $ log);
+}
+
 (* DUMP *)
 let dump = {
   name = "dump";
@@ -145,6 +162,23 @@ let dump = {
       run (Dog_client.dump_log ~root key)
     in
     Term.(mk dump $ root $ key 0);
+}
+
+(* SERVER DUMP *)
+let server_dump = {
+  name = "serverdump";
+  doc  = "Dump the contents of the secure log to stdout.";
+  man  = [];
+  term =
+    let client_name =
+      let doc =
+        Arg.info ~docv:"NAME" ~doc:"The client name." [] in
+      Arg.(required & pos 0 (some string) None & doc)
+    in
+    let dump root client_name =
+      run (Dog.dump_log ~root client_name)
+    in
+    Term.(mk dump $ root $ client_name);
 }
 
 (* PUSH *)
@@ -168,6 +202,30 @@ let push = {
       run (Dog_client.push ~root ~msg server)
     in
     Term.(mk push $ root $ msg $ server);
+}
+
+(* INTERMEDIARY SERVER *)
+let intermediary = {
+  name = "intermediary";
+  doc  = "Run an interemediary server.";
+  man  = [];
+  term =
+    let port =
+      let doc =
+        Arg.info ~docv:"PORT" ~doc:"The port to listen on." [] in
+      Arg.(required & pos 0 (some string) None & doc)
+    in
+    let server =
+      let doc =
+        Arg.info ~docv:"SERVER" ~doc:"The trusted server URI." [] in
+      Arg.(required & pos 1 (some string) None & doc)
+    in
+    let listen root port server =
+      let server = Uri.of_string server in
+      let port = int_of_string port in
+      run (Dog_intermediary.listen ~root port server)
+    in
+    Term.(mk listen $ root $ port $ server);
 }
 
 (* LISTEN *)
@@ -243,14 +301,74 @@ let test_key = {
     Term.(mk test $ root $ key 0);
 }
 
+open Lwt.Infix
+
+let _ = Dog_intermediary.listen
+
+       (*
+let () = Log.set_log_level Log.DEBUG
+          *)
+
+(* test *)
+let test_server = {
+  name = "test_server";
+  doc  = "AAAAAAAA";
+  man  = [];
+  term =
+    let test () =
+      run (
+        let open Cohttp in
+        let module Server = Cohttps.Server_l in
+        let callback _conn req body =
+          let uri = req |> Request.uri |> Uri.to_string in
+          let meth = req |> Request.meth |> Code.string_of_method in
+          let headers = req |> Request.headers |> Header.to_string in
+          body |> Cohttp_lwt_body.to_string >|= (fun body ->
+              (Printf.sprintf "Server speaking!\nUri: %s\nMethod: %s\nHeaders\nHeaders: %s\nBody: %s"
+                 uri meth headers body))
+          >>= (fun body -> Server.respond_string ~status:`OK ~body ())
+        in
+        Server.listen (Server.make ~callback ()) (Uri.of_string "http://localhost:8080/")
+      )
+    in
+    Term.(mk test $ const ());
+}
+
+(* test *)
+let test_client = {
+  name = "test_client";
+  doc  = "AAAAAAAA";
+  man  = [];
+  term =
+    let test () =
+      run (
+        let open Cohttp in
+        let module Client = Cohttps.Client in
+        Client.get (Uri.of_string "http://127.0.0.1:8080/") >>= fun (resp, body) ->
+        let code = resp |> Response.status |> Code.code_of_status in
+        Printf.printf "Response code: %d\n" code;
+        Printf.printf "Headers: %s\n" (resp |> Response.headers |> Header.to_string);
+        body |> Cohttp_lwt_body.to_string >|= fun body ->
+        Printf.printf "Body of length: %d\n" (String.length body);
+        Printf.printf "Bodt of %s\n%!" body
+      )
+    in
+    Term.(mk test $ const ());
+}
+
 let commands = List.map create_command [
     help;
     init;
     push;
     listen;
+    intermediary;
     append;
+    test_append;
+    server_dump;
     dump;
     test_key;
+    test_server;
+    test_client;
   ]
 
 let () = Ezcmdliner.run default commands

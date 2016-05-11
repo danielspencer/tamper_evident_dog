@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
+module Log = Log.Make (struct let section = "Dog.client" end)
 open Irmin_unix
 open Sexplib.Std
 
@@ -95,24 +96,30 @@ let write_to_log ~root message =
   let log' = Secure_log.append entry_type (Cstruct.of_string message) log in
   write_log ~root store log'
 
+let test_write_to_log ~root message =
+  Dog_misc.(mk_store base_store ~root) >>= fun t ->
+  let store = t "secure_log" in
+  read_log ~root store >>= fun log ->
+  let log = ref log in
+  for _ = 1 to 1000 do
+    log := Secure_log.append entry_type (Cstruct.of_string message) !log
+  done;
+  write_log ~root store !log
+
 let dump_log ~root key =
   let key = key |> Cstruct.of_string |> Secure_log.key_of_cstruct in
   Dog_misc.(mk_store base_store ~root) >>= fun t ->
   let store = t "secure_log" in
   read_log ~root store >|= fun log ->
-  (*
-  List.iteri
-    (fun i _ ->
-       let str = Secure_log.get_entry log key i |> Cstruct.to_string in
-       Printf.printf "%i: %s" i str)
-    (Secure_log.get_entries log)
-     *)
   Secure_log.decrypt_all log key
   |> List.map Cstruct.to_string
   |> List.iteri (fun i str -> Printf.printf "%i: %s\n" i str)
 
 let remote_store =
+  Irmin.basic (module Cohttps.Client_make) (module Irmin.Contents.String)
+    (*
   Irmin.basic (module Irmin_http.Make) (module Irmin.Contents.String)
+       *)
 
 let chdir dir = Unix.handle_unix_error Unix.chdir dir
 
@@ -184,11 +191,15 @@ let push ~root ~msg ?watch server =
   Irmin.tag_exn (t "tag") >>= fun tag ->
   Irmin.of_tag remote_store config Dog_misc.task tag >>= fun remote ->
   let rec aux () =
+    Log.debug "Aux reached\n"; flush stdout;
     let files = rec_files ~keep root in
     Irmin.with_hrw_view (t msg) `Update (update_files files) >>=
     Irmin.Merge.exn >>= fun () ->
+    Log.debug "performed local store\n"; flush stdout;
     let remote = Irmin.remote_basic (remote "dog push") in
+    Log.debug "Created remote\n"; flush stdout;
     Irmin.push_exn (t msg) remote >>= fun () ->
+    Log.debug "Finished pushing\n"; flush stdout;
     match watch with
     | None   -> Lwt.return_unit
     | Some d ->

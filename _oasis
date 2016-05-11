@@ -10,7 +10,7 @@ BuildTools:  ocamlbuild
 Library dog
   Path:              lib/
   Findlibname:       dog
-  Modules:           Dog, Dog_client, Dog_misc
+  Modules:           Dog, Dog_client, Dog_misc, Cohttps, Dog_intermediary
   BuildDepends:      lwt, irmin.unix, re.glob, dolog, secure_log_lib
 
 Executable dog

@@ -16,7 +16,7 @@
 
 
 open Printf
-module Log = Log.Make (struct let section = "Dog.server" end)
+module Log = Log.Make (struct let section = "Dog.intermediary" end)
 module Test = Irmin_http_server
 open Irmin_unix
 open Dog_misc
@@ -64,8 +64,6 @@ type pattern = string * (string -> bool)
 let pattern_err pat =
   `Error (sprintf "%s is not a valid pattern" pat)
 
-let string_of_pattern (p, _) = p
-
 let pattern pat =
   match
     (try `Ok (Re.compile (Re.no_case (Re_glob.globx pat)))
@@ -73,8 +71,6 @@ let pattern pat =
   with
   | `Error e -> `Error e
   | `Ok re   -> `Ok (pat, fun x -> Re.execp re x)
-
-let compare_pattern (x, _) (y, _) = String.compare x y
 
 let pattern_exn pat =
   match pattern pat with
@@ -84,9 +80,6 @@ let pattern_exn pat =
 let check (_, f) x = f x
 
 type merges = (pattern * merge) list
-
-let string_of_pm (p, m) =
-  Printf.sprintf "%s %s" (string_of_pattern p) (string_of_merge m)
 
 let pm_of_string_exn s =
   if String.length s > 0 && s.[0] = '#' then
@@ -100,14 +93,6 @@ let pm_of_string_exn s =
       Some (pattern_exn p, merge_of_string_exn m)
     with Not_found ->
       failwith (sprintf "%s is not a valid merge strategy line." s)
-
-let string_of_merges ms =
-  let buf = Buffer.create 1025 in
-  List.iter (fun pm ->
-      Buffer.add_string buf (string_of_pm pm);
-      Buffer.add_char buf '\n';
-    ) ms;
-  Buffer.contents buf
 
 let merges_of_string str =
   let buf = Mstruct.of_string str in
@@ -222,7 +207,6 @@ end
 type t = ([`BC], path, file) Irmin.t
 
 let dot_merge = ".merge"
-let default_merges: merges = [ pattern_exn dot_merge, `Set ]
 let dot_merge_file = [dot_merge]
 
 let raw_store = Dog_misc.mk_store base_store
@@ -260,6 +244,7 @@ let merge_subtree t config client =
   M.create config task >>= fun master ->
   V.merge_path (str master "Merging %s's changes" client) ~n:1 [client] view
 
+(*
 let load_log store client =
   Irmin.read store [client; "secure_log"]
   >|= function
@@ -269,34 +254,17 @@ let load_log store client =
     let entries = Sexplib.Std.list_of_sexp Secure_log.entry_of_sexp entries_sexp in
     let dummy_key = Secure_log.key_of_cstruct (Cstruct.create 16) in
     Secure_log.reconstruct dummy_key entries
+   *)
 
-let read_key ~root client =
-  let name = (List.fold_left Filename.concat "" [root; client; ".key"]) in
-  Printf.printf "name: %s\n" name;
-  Lwt_io.with_file
-    ~flags:[Unix.O_RDONLY]
-    ~mode:Lwt_io.input
-    name
-    (fun channel ->
-       Lwt_io.read channel >|= fun str ->
-       Cstruct.of_string str
-       |> Secure_log.key_of_cstruct)
+let remote_store =
+  Irmin.basic (module Cohttps.Client_make) (module Irmin.Contents.String)
 
-let dump_log ~root client =
+let listen ~root port server =
   let config = config ~root in
   Irmin.create base_store config task >>= fun t ->
-  let store = (t "Dumping secure log") in
-  load_log store client >>= fun log ->
-  read_key ~root client >>= fun key ->
-  Secure_log.decrypt_all log key
-  |> List.map Cstruct.to_string
-  |> List.iteri (fun i str -> Printf.printf "%i: %s\n" i str);
-  Lwt.return_unit
-
-let listen ~root =
-  let config = config ~root in
-  Irmin.create base_store config task >>= fun t ->
+  (*
   let init_t = t in
+     *)
   Irmin.tags (t "Getting tags") >>= fun clients ->
   let clients = List.filter ((<>)"master") clients in
   let () = match clients with
@@ -358,10 +326,22 @@ let listen ~root =
         Lwt_list.iter_s watch (StringSet.elements new_clients)
       in
 
+      let config = Irmin_http.config server in
+      Irmin.of_tag remote_store config Dog_misc.task "master" >>= fun remote ->
+
+      let attempt_sync () =
+        let remote = Irmin.remote_basic (remote "dog push") in
+        Log.info "Created remote\n"; flush stdout;
+        Irmin.push_exn (t "intermediary push") remote >>= fun () ->
+        Log.info "Finished pushing\n"; flush stdout;
+        Lwt.return_unit
+      in
+
       let hooks = {
         Test.update = fun () ->
           watch_new () >>= fun () ->
           Lwt_list.iter_s (fun (_, m) -> m ()) !merge_hooks
+            (*
           >>= fun () ->
           Irmin.tags (t "tags") >>= fun clients ->
           let clients = List.filter ((<>)"master") clients in
@@ -369,13 +349,26 @@ let listen ~root =
             (fun client ->
                let store = init_t "validate" in
                load_log store client >>= fun log ->
-               read_key ~root client >|= fun key ->
-               Secure_log.validate_macs log key
+               let entries = Secure_log.get_entries log in
+               Secure_log.validate entries
             )
             clients
+               *)
+          >>= fun () ->
+          attempt_sync ()
       } in
+
+      let rec poll () =
+        attempt_sync () >>= fun () ->
+        Lwt_unix.sleep 60. >>= fun () ->
+        poll ()
+      in
+      poll () |> Lwt.ignore_result;
 
       install_dir_polling_listener 1.;
       Server.create config task >>= fun s ->
-      HTTP.listen (s "Listen") ~hooks (Uri.of_string "http://localhost:8080")
+      HTTP.listen
+        (s "Listen")
+        ~hooks
+        (Uri.of_string (Printf.sprintf "http://localhost:%i" port))
     )

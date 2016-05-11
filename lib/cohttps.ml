@@ -1,3 +1,4 @@
+open Lwt.Infix
 let foo = "asdf"
 
 module IO = struct
@@ -45,17 +46,17 @@ module IO = struct
   let flush oc = Lwt_io.flush oc
 end
 
-
 module Net = struct
   open Lwt
   module IO = IO
   type ctx = Tls.Config.client
   let sexp_of_ctx = Tls.Config.sexp_of_client
-  let default_ctx = Tls.Config.client ~authenticator:X509.Authenticator.null ()
+  let default_ctx =
+    Tls.Config.client ~authenticator:X509.Authenticator.null ()
 
   let connect_uri ~ctx uri =
     let host = match Uri.host uri with None -> assert false | Some h -> h in
-    let port = match Uri.port uri with None -> assert false | Some p -> p in
+    let port = match Uri.port uri with None -> 443          | Some p -> p in
     let conn =
       Tls_lwt.Unix.connect ctx (host, port)
     in
@@ -63,7 +64,11 @@ module Net = struct
         let ic, oc = Tls_lwt.of_t conn in
         Lwt.return (conn, ic, oc)
 
-  let close c = Lwt.catch (fun () -> Lwt_io.close c) (fun _ -> return_unit)
+  let close c = Lwt.catch
+      (fun () -> Lwt_io.close c)
+      (fun _ ->
+         Printf.printf "CLOSING A CLIENT STREAM?\n%!";
+         return_unit)
 
   let close_in ic = ignore_result (close ic)
 
@@ -74,12 +79,8 @@ module Net = struct
 end
 
 module Client = Cohttp_lwt.Make_client (IO) (Net)
-module Server = struct
-  include Cohttp_lwt.Make_server (IO)
+module Server = Cohttp_lwt.Make_server (IO)
 
-  (** Start the server, listening at the given adress. *)
-
-end
 
 
 module Y = struct
@@ -88,20 +89,64 @@ module Y = struct
     Printf.sprintf "%02d:%02d:%02d"
       tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
 end
-  module X = struct
-    include Cohttp_lwt_unix.Server
-    let listen t ?timeout uri =
-      let port = match Uri.port uri with
-        | None   -> 8080
-        | Some p -> p in
-      create ?timeout ~mode:(`TCP (`Port port)) t
-  end
+
+let safely th =
+  Lwt.catch (fun () -> th >>= fun _ -> Lwt.return_unit) (fun _ -> Lwt.return_unit)
+
+let accept_fine ?trace conf fd =
+  Printf.printf "Initialised accept\n"; flush stdout;
+  Lwt_unix.accept fd >>= fun (fd', addr) ->
+  Printf.printf "Accepted\n"; flush stdout;
+  Lwt.catch (fun () ->
+      Tls_lwt.Unix.server_of_fd conf ?trace fd'
+      >|= fun t ->
+      Printf.printf "TLS server created?\n"; flush stdout;
+      (t, addr))
+    (fun exn ->
+       safely (Lwt_unix.close fd') >>= fun () -> Lwt.fail exn)
+
+let serve_ssl port callback =
+  X509_lwt.private_of_pems
+    ~cert:"../certs/example.com.crt"
+    ~priv_key:"../certs/example.com.key"
+  >>= fun certificate ->
+  let config =
+    Tls.Config.(server ~certificates:(`Single certificate) ~ciphers:Ciphers.supported ())
+  in
+  let server_s =
+    let open Lwt_unix in
+    let s = socket PF_INET SOCK_STREAM 0 in
+    setsockopt s Unix.SO_REUSEADDR true ;
+    bind s (ADDR_INET (Unix.inet_addr_any, port)) ;
+    listen s 1000 ;
+    s in
+  accept_fine config server_s >>= fun (t, addr) ->
+  Printf.printf "Tls session passed to callback\n"; flush stdout;
+  callback t addr
+  (*
+  Lwt.catch
+    (fun () -> callback t addr)
+    (fun _ ->
+       Printf.printf "AAAAAAAAAAAAAAAAAAAA\n"; flush stdout;
+       Printexc.print_backtrace stdout; flush stdout; Lwt.return_unit)
+         *)
+
+module X = struct
+  include Server
+  let listen t ?timeout:_ uri =
+    let port = match Uri.port uri with
+      | None   -> 443
+      | Some p -> p in
+    serve_ssl port (fun tls _addr ->
+        let ic, oc = Tls_lwt.of_t tls in
+        callback t tls ic oc)
+end
+
+module Server_l = X
 
 
-module Make = Irmin_http_server.Make (X)(Y)
+module TServer_make = Irmin_http_server.Make (X)(Y)
+module TClient_make = Irmin_http.Make (Client)
 
-
-(*
-module Make_server = Irmin_http_server.Make (Server)
-    Irmin_http_server.Make
-   *)
+module Server_make = Irmin_unix.Irmin_http_server.Make
+module Client_make = Irmin_unix.Irmin_http.Make

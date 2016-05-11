@@ -110,5 +110,7 @@ val with_store: root:string -> 'a callback -> 'a Lwt.t
     {!dot_merge_file} and apply the function [f] to the resulting
     store.  *)
 
+val dump_log : root:string -> string -> unit Lwt.t
+
 val listen: root:string -> unit Lwt.t
 (** FIXME *)

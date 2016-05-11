@@ -12,6 +12,15 @@ module Net : Cohttp_lwt.Net
 module Client : Cohttp_lwt.S.Client
 module Server : Cohttp_lwt.S.Server
 
+module Server_l : sig
+  include Cohttp_lwt.S.Server
+  val listen : t -> ?timeout:'a -> Uri.t -> unit Lwt.t
+end
+
+
+module Server_make : functor (S : Irmin.S) -> Irmin_http_server.S with type t = S.t
+module Client_make : Irmin.S_MAKER
+
 (*
 module Irmin_server : Irmin_http_server.S
    *)
