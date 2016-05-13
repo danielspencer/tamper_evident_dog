@@ -185,6 +185,13 @@ let update_files files view =
       Irmin.update view path (of_path path)
     ) files
 
+
+let commit ~root ~msg =
+  Dog_misc.(mk_store base_store ~root) >>= fun t ->
+  let files = rec_files ~keep root in
+  Irmin.with_hrw_view (t msg) `Update (update_files files) >>=
+  Irmin.Merge.exn
+
 let push ~root ~msg ?watch server =
   let config = Irmin_http.config server in
   Dog_misc.(mk_store base_store ~root) >>= fun t ->

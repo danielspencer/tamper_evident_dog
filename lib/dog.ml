@@ -272,7 +272,6 @@ let load_log store client =
 
 let read_key ~root client =
   let name = (List.fold_left Filename.concat "" [root; client; ".key"]) in
-  Printf.printf "name: %s\n" name;
   Lwt_io.with_file
     ~flags:[Unix.O_RDONLY]
     ~mode:Lwt_io.input
@@ -370,7 +369,14 @@ let listen ~root =
                let store = init_t "validate" in
                load_log store client >>= fun log ->
                read_key ~root client >|= fun key ->
-               Secure_log.validate_macs log key
+               try
+                 Secure_log.validate_macs log key;
+                 Secure_log.validate (Secure_log.get_entries log)
+               with Secure_log.Invalid_log ->
+                 let red = "\027[31m" in
+                 let reset = "\027[0m" in
+                 Printf.printf "%sClient %s has violated log constraints!%s\n%!"
+                   red client reset
             )
             clients
       } in

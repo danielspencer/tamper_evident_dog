@@ -19,4 +19,5 @@ val write_to_log: root:string -> string -> unit Lwt.t
 val test_write_to_log: root:string -> string -> unit Lwt.t
 val test_key_write_read : root:string -> string -> unit Lwt.t
 val dump_log: root:string -> string -> unit Lwt.t
+val commit: root:string -> msg:string -> unit Lwt.t
 val push: root:string -> msg:string -> ?watch:float -> Uri.t -> unit Lwt.t

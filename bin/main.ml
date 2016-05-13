@@ -181,6 +181,23 @@ let server_dump = {
     Term.(mk dump $ root $ client_name);
 }
 
+(* COMMIT *)
+let commit = {
+  name = "commit";
+  doc  = "Synchronize the client store to a Dog server.";
+  man  = [];
+  term =
+    let msg =
+      let doc =
+        Arg.info ~docv:"MSG" ~doc:"The commit message." ["m"] in
+      Arg.(required & opt (some string) None & doc)
+    in
+    let commit root msg =
+      run (Dog_client.commit ~root ~msg)
+    in
+    Term.(mk commit $ root $ msg);
+}
+
 (* PUSH *)
 let push = {
   name = "push";
@@ -359,6 +376,7 @@ let test_client = {
 let commands = List.map create_command [
     help;
     init;
+    commit;
     push;
     listen;
     intermediary;
