@@ -1,10 +1,10 @@
 opam-version: "1.2"
-maintainer:   "thomas@gazagnaire.org"
-authors:      "Thomas Gazagnaire"
+maintainer:   "daniel.ds.spencer@gmail.com"
+authors:      ["Thomas Gazagnaire" "Daniel Spencer"]
 license:      "ISC"
-homepage:     "https://github.com/samoht/dog"
-bug-reports:  "https://github.com/samoht/dog/issues"
-dev-repo:     "https://github.com/samoht/dog.git"
+homepage:     "https://github.com/danielspencer/tamper_evident_dog"
+bug-reports:  "https://github.com/danielspencer/tamper_evident_dog"
+dev-repo:     "https://github.com/danielspencer/tamper_evident_dog.git"
 
 build: [
   ["./configure" "--prefix" prefix]
