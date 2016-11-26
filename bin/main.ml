@@ -135,35 +135,6 @@ let append = {
     Term.(mk write $ root $ log);
 }
 
-(* APPEND *)
-let test_append = {
-  name = "test_append";
-  doc  = "Append to the secure log.";
-  man  = [];
-  term =
-    let log =
-      let doc =
-        Arg.info ~docv:"LOG" ~doc:"The message to log" [] in
-      Arg.(required & pos 0 (some string) None & doc)
-    in
-    let write root log =
-      run (Dog_client.test_write_to_log ~root log)
-    in
-    Term.(mk write $ root $ log);
-}
-
-(* DUMP *)
-let dump = {
-  name = "dump";
-  doc  = "Dump the contents of the secure log to stdout.";
-  man  = [];
-  term =
-    let dump root key =
-      run (Dog_client.dump_log ~root key)
-    in
-    Term.(mk dump $ root $ key 0);
-}
-
 (* SERVER DUMP *)
 let server_dump = {
   name = "serverdump";
@@ -306,18 +277,6 @@ let default =
     ~doc
     ~man
 
-(* test *)
-let test_key = {
-  name = "test_key";
-  doc  = "AAAAAAAA";
-  man  = [];
-  term =
-    let test root key =
-      run (Dog_client.test_key_write_read ~root key)
-    in
-    Term.(mk test $ root $ key 0);
-}
-
 open Lwt.Infix
 
 let _ = Dog_intermediary.listen
@@ -381,10 +340,7 @@ let commands = List.map create_command [
     listen;
     intermediary;
     append;
-    test_append;
     server_dump;
-    dump;
-    test_key;
     test_server;
     test_client;
   ]

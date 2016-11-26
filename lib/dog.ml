@@ -260,37 +260,19 @@ let merge_subtree t config client =
   M.create config task >>= fun master ->
   V.merge_path (str master "Merging %s's changes" client) ~n:1 [client] view
 
-let load_log store client =
-  Irmin.read store [client; "secure_log"]
-  >|= function
-  | None -> assert false
-  | Some entries_sexp ->
-    let entries_sexp = Sexplib.Sexp.of_string entries_sexp in
-    let entries = Sexplib.Std.list_of_sexp Secure_log.entry_of_sexp entries_sexp in
-    let dummy_key = Secure_log.key_of_cstruct (Cstruct.create 16) in
-    Secure_log.reconstruct dummy_key entries
+let meta_loc ~root client =
+  List.fold_left Filename.concat "" [root; client; ".meta"]
 
-let read_key ~root client =
-  let name = (List.fold_left Filename.concat "" [root; client; ".key"]) in
-  Lwt_io.with_file
-    ~flags:[Unix.O_RDONLY]
-    ~mode:Lwt_io.input
-    name
-    (fun channel ->
-       Lwt_io.read channel >|= fun str ->
-       Cstruct.of_string str
-       |> Secure_log.key_of_cstruct)
+let secure_log_path client = [client; "secure_log"]
 
 let dump_log ~root client =
   let config = config ~root in
   Irmin.create base_store config task >>= fun t ->
   let store = (t "Dumping secure log") in
-  load_log store client >>= fun log ->
-  read_key ~root client >>= fun key ->
-  Secure_log.decrypt_all log key
-  |> List.map Cstruct.to_string
-  |> List.iteri (fun i str -> Printf.printf "%i: %s\n" i str);
-  Lwt.return_unit
+  let st =
+    Secure_irmin.Server.create store (secure_log_path client) (meta_loc ~root client)
+  in
+  Secure_irmin.Server.dump_log st
 
 let listen ~root =
   let config = config ~root in
@@ -367,16 +349,22 @@ let listen ~root =
           Lwt_list.iter_s
             (fun client ->
                let store = init_t "validate" in
-               load_log store client >>= fun log ->
-               read_key ~root client >|= fun key ->
-               try
-                 Secure_log.validate_macs log key;
-                 Secure_log.validate (Secure_log.get_entries log)
-               with Secure_log.Invalid_log ->
-                 let red = "\027[31m" in
-                 let reset = "\027[0m" in
-                 Printf.printf "%sClient %s has violated log constraints!%s\n%!"
-                   red client reset
+               let t =
+                 Secure_irmin.Server.create store (secure_log_path client) (meta_loc ~root client)
+               in
+               Lwt.catch
+                 (fun () -> Secure_irmin.Server.validate_macs t)
+                 (function
+                   | Secure_irmin.Invalid_log ->
+                     let red = "\027[31m" in
+                     let reset = "\027[0m" in
+                     Printexc.print_backtrace stdout;
+                     flush stdout;
+                     Printf.printf "%sClient %s has violated log constraints!%s\n%!"
+                       red client reset;
+                     Lwt.return_unit
+                   | _ as e -> Lwt.fail e
+                 )
             )
             clients
       } in

@@ -14,7 +14,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *)
 
-
 open Printf
 module Log = Log.Make (struct let section = "Dog.intermediary" end)
 module Test = Irmin_http_server
@@ -244,20 +243,17 @@ let merge_subtree t config client =
   M.create config task >>= fun master ->
   V.merge_path (str master "Merging %s's changes" client) ~n:1 [client] view
 
-(*
-let load_log store client =
-  Irmin.read store [client; "secure_log"]
-  >|= function
-  | None -> assert false
-  | Some entries_sexp ->
-    let entries_sexp = Sexplib.Sexp.of_string entries_sexp in
-    let entries = Sexplib.Std.list_of_sexp Secure_log.entry_of_sexp entries_sexp in
-    let dummy_key = Secure_log.key_of_cstruct (Cstruct.create 16) in
-    Secure_log.reconstruct dummy_key entries
-   *)
-
 let remote_store =
   Irmin.basic (module Cohttps.Client_make) (module Irmin.Contents.String)
+
+let local_store =
+  let module Conf = struct let merges () = Lwt.return [] end in
+  let module File = File (Conf) in
+  Irmin.basic (module Irmin_git.FS) (module File)
+
+(*
+let secure_log_path client = [client; "secure_log"]
+   *)
 
 let listen ~root port server =
   let config = config ~root in
@@ -326,15 +322,28 @@ let listen ~root port server =
         Lwt_list.iter_s watch (StringSet.elements new_clients)
       in
 
-      let config = Irmin_http.config server in
-      Irmin.of_tag remote_store config Dog_misc.task "master" >>= fun remote ->
+      let remote_config = Irmin_http.config server in
 
       let attempt_sync () =
-        let remote = Irmin.remote_basic (remote "dog push") in
-        Log.info "Created remote\n"; flush stdout;
-        Irmin.push_exn (t "intermediary push") remote >>= fun () ->
-        Log.info "Finished pushing\n"; flush stdout;
-        Lwt.return_unit
+        Lwt.catch
+          (fun () ->
+             Irmin.tags (t "tags") >>= fun clients ->
+             let clients = List.filter ((<>)"master") clients in
+             Lwt_list.iter_s
+               (fun client ->
+                  Irmin.of_tag remote_store remote_config Dog_misc.task client
+                  >>= fun remote ->
+                  let remote = Irmin.remote_basic (remote "intermediary push") in
+                  Irmin.of_tag local_store config Dog_misc.task client
+                  >>= fun bt ->
+                  Irmin.push_exn (bt "intermediary push") remote)
+               clients
+             >>= fun () ->
+             Log.info "Finished pushing\n"; flush stdout;
+             Lwt.return_unit)
+          (fun _ ->
+             Log.info "Pushing failed\n"; flush stdout;
+             Lwt.return_unit)
       in
 
       let hooks = {
@@ -348,9 +357,22 @@ let listen ~root port server =
           Lwt_list.iter_s
             (fun client ->
                let store = init_t "validate" in
-               load_log store client >>= fun log ->
-               let entries = Secure_log.get_entries log in
-               Secure_log.validate entries
+               let t =
+                 Secure_irmin.Intermediary.create store (secure_log_path client)
+               in
+               Lwt.catch
+                 (fun () -> Secure_irmin.Intermediary.validate t)
+                 (function
+                   | Secure_irmin.Invalid_log ->
+                     let red = "\027[31m" in
+                     let reset = "\027[0m" in
+                     Printexc.print_backtrace stdout;
+                     flush stdout;
+                     Printf.printf "%sClient %s has violated log constraints!%s\n%!"
+                       red client reset;
+                     Lwt.return_unit
+                   | _ as e -> Lwt.fail e
+                 )
             )
             clients
                *)
@@ -360,13 +382,13 @@ let listen ~root port server =
 
       let rec poll () =
         attempt_sync () >>= fun () ->
-        Lwt_unix.sleep 60. >>= fun () ->
+        Lwt_unix.sleep 6. >>= fun () ->
         poll ()
       in
       poll () |> Lwt.ignore_result;
 
       install_dir_polling_listener 1.;
-      Server.create config task >>= fun s ->
+      Server.create remote_config task >>= fun s ->
       HTTP.listen
         (s "Listen")
         ~hooks
