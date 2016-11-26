@@ -1,6 +1,8 @@
-## Dog
+## Tamper Evident Dog
 
 A loyal and faithful synchronisation tool that you can rely on.
+
+Heavily based on [dog by samoht](https://github.com/samoht/dog).
 
 ### Client Commands
 
@@ -25,7 +27,7 @@ Send data to the server. The error code indicate server merge success or error.
 dog push -m "<MSG>" <SERVER>
 ```
 
-- <MSG> is the commit message.
+- `<MSG>` is the commit message.
 - `<SERVER>` is the server url.
 
 ### Server commands
